@@ -1,0 +1,87 @@
+---
+# Microservices role - Deploy microservices application
+
+- name: Create microservices directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/microservices
+    - /opt/microservices/api-gateway
+    - /opt/microservices/auth-service
+    - /opt/microservices/product-service
+    - /opt/microservices/order-service
+    - /opt/microservices/logs
+
+- name: Copy docker-compose file
+  template:
+    src: docker-compose.yml.j2
+    dest: /opt/microservices/docker-compose.yml
+    mode: '0644'
+
+- name: Copy environment file
+  template:
+    src: .env.j2
+    dest: /opt/microservices/.env
+    mode: '0600'
+
+- name: Create log rotation configuration
+  copy:
+    content: |
+      /opt/microservices/logs/*.log {
+        daily
+        rotate 7
+        compress
+        delaycompress
+        notifempty
+        create 0644 ubuntu ubuntu
+        sharedscripts
+        postrotate
+          docker-compose -f /opt/microservices/docker-compose.yml restart
+        endscript
+      }
+    dest: /etc/logrotate.d/microservices
+    mode: '0644'
+
+- name: Install Node.js (for local development)
+  shell: |
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+    apt-get install -y nodejs
+  args:
+    creates: /usr/bin/node
+
+- name: Install Python 3.11
+  apt:
+    name:
+      - python3.11
+      - python3.11-venv
+      - python3-pip
+    state: present
+
+- name: Create systemd service for microservices
+  copy:
+    content: |
+      [Unit]
+      Description=Microservices Application
+      Requires=docker.service
+      After=docker.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/microservices
+      ExecStart=/usr/local/bin/docker-compose up -d
+      ExecStop=/usr/local/bin/docker-compose down
+      TimeoutStartSec=0
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/microservices.service
+    mode: '0644'
+
+- name: Enable microservices systemd service
+  systemd:
+    name: microservices
+    enabled: yes
+    daemon_reload: yes

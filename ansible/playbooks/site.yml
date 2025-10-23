@@ -1,0 +1,44 @@
+---
+# Main playbook - Provisions all servers and deploys microservices
+
+- name: Configure Jenkins Server
+  hosts: jenkins
+  become: yes
+  roles:
+    - common
+    - docker
+    - jenkins
+
+- name: Configure Microservices Servers
+  hosts: microservices
+  become: yes
+  roles:
+    - common
+    - docker
+    - microservices
+    - monitoring
+
+- name: Deploy Application
+  hosts: microservices
+  become: yes
+  tasks:
+    - name: Pull latest Docker images
+      command: docker-compose pull
+      args:
+        chdir: /opt/microservices
+
+    - name: Start microservices
+      command: docker-compose up -d
+      args:
+        chdir: /opt/microservices
+
+    - name: Wait for services to be healthy
+      wait_for:
+        port: "{{ item }}"
+        delay: 10
+        timeout: 120
+      loop:
+        - 3000  # API Gateway
+        - 3001  # Auth Service
+        - 3002  # Product Service
+        - 3003  # Order Service
