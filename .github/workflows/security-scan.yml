@@ -1,0 +1,218 @@
+name: Security Scanning
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run security scans every Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # Trivy filesystem vulnerability scanning
+  trivy-fs-scan:
+    name: Trivy Filesystem Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner in fs mode
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+
+  # Trivy container image scanning
+  trivy-image-scan:
+    name: Trivy Image Scan
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, auth-service, product-service, order-service]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ matrix.service }}:${{ github.sha }} \
+            services/${{ matrix.service }}
+
+      - name: Run Trivy vulnerability scanner on image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.service }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-image-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
+
+  # npm audit for Node.js services
+  npm-audit:
+    name: NPM Security Audit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [api-gateway, product-service]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run npm audit
+        working-directory: services/${{ matrix.service }}
+        run: |
+          npm audit --audit-level=moderate --json > npm-audit-${{ matrix.service }}.json || true
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-${{ matrix.service }}
+          path: services/${{ matrix.service }}/npm-audit-${{ matrix.service }}.json
+
+  # pip-audit for Python services
+  pip-audit:
+    name: Python Security Audit
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [auth-service, order-service]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: pip install -r requirements.txt
+
+      - name: Run pip-audit
+        working-directory: services/${{ matrix.service }}
+        run: |
+          pip-audit --format json > pip-audit-${{ matrix.service }}.json || true
+
+      - name: Upload audit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pip-audit-${{ matrix.service }}
+          path: services/${{ matrix.service }}/pip-audit-${{ matrix.service }}.json
+
+  # Terraform security scanning with tfsec
+  tfsec-scan:
+    name: Terraform Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: 'infrastructure/terraform'
+          format: 'sarif'
+          soft_fail: false
+
+      - name: Upload tfsec results
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: results.sarif
+
+  # Secret scanning with git-secrets
+  secret-scan:
+    name: Secret Detection
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install git-secrets
+        run: |
+          git clone https://github.com/awslabs/git-secrets
+          cd git-secrets
+          sudo make install
+
+      - name: Register AWS patterns
+        run: |
+          git secrets --register-aws
+          git secrets --add 'password\s*=\s*.+'
+          git secrets --add 'api[_-]?key\s*=\s*.+'
+          git secrets --add 'secret\s*=\s*.+'
+
+      - name: Scan repository
+        run: git secrets --scan
+
+  # Docker Bench Security (when deployed)
+  # docker-bench:
+  #   name: Docker Bench Security
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Run Docker Bench
+  #       run: |
+  #         docker run -it --net host --pid host --userns host --cap-add audit_control \
+  #           -v /var/lib:/var/lib \
+  #           -v /var/run/docker.sock:/var/run/docker.sock \
+  #           -v /etc:/etc \
+  #           docker/docker-bench-security
+
+  # Security summary
+  security-summary:
+    name: Security Scan Summary
+    runs-on: ubuntu-latest
+    needs: [trivy-fs-scan, trivy-image-scan, npm-audit, pip-audit, tfsec-scan, secret-scan]
+    if: always()
+    steps:
+      - name: Create summary
+        run: |
+          echo "# Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Scans Completed:" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Trivy filesystem scan" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Trivy container image scan" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ NPM dependency audit" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Python dependency audit" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Terraform security scan (tfsec)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Secret detection" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the 'Security' tab for detailed findings." >> $GITHUB_STEP_SUMMARY

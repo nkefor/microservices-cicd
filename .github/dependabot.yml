@@ -1,0 +1,122 @@
+# Dependabot configuration for automated dependency updates and security patches
+
+version: 2
+updates:
+  # Node.js - API Gateway
+  - package-ecosystem: "npm"
+    directory: "/services/api-gateway"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "nkefor"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Node.js - Product Service
+  - package-ecosystem: "npm"
+    directory: "/services/product-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "nkefor"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Python - Auth Service
+  - package-ecosystem: "pip"
+    directory: "/services/auth-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "nkefor"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Python - Order Service
+  - package-ecosystem: "pip"
+    directory: "/services/order-service"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "nkefor"
+    labels:
+      - "dependencies"
+      - "security"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+
+  # Docker images
+  - package-ecosystem: "docker"
+    directory: "/services/api-gateway"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "security"
+
+  - package-ecosystem: "docker"
+    directory: "/services/auth-service"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "security"
+
+  - package-ecosystem: "docker"
+    directory: "/services/product-service"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "security"
+
+  - package-ecosystem: "docker"
+    directory: "/services/order-service"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "docker"
+      - "security"
+
+  # Terraform
+  - package-ecosystem: "terraform"
+    directory: "/infrastructure/terraform/environments/dev"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "terraform"
+      - "infrastructure"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "github-actions"
+      - "ci-cd"
