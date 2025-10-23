@@ -1,0 +1,168 @@
+# Prometheus Alert Rules
+
+groups:
+  - name: infrastructure_alerts
+    interval: 30s
+    rules:
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% (current: {{ $value }}%)"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          category: infrastructure
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% (current: {{ $value }}%)"
+
+      # Low Disk Space
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes{fstype!~"tmpfs|fuse.lxcfs"} / node_filesystem_size_bytes) * 100 < 20
+        for: 10m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space below 20% on {{ $labels.mountpoint }} (current: {{ $value }}%)"
+
+      # Instance Down
+      - alert: InstanceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "Instance {{ $labels.instance }} is down"
+          description: "{{ $labels.job }} on {{ $labels.instance }} has been down for more than 1 minute"
+
+  - name: application_alerts
+    interval: 30s
+    rules:
+      # High HTTP Error Rate
+      - alert: HighHTTPErrorRate
+        expr: (rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 5
+        for: 5m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "High HTTP error rate on {{ $labels.service }}"
+          description: "Error rate is above 5% (current: {{ $value }}%)"
+
+      # High Response Time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          category: application
+        annotations:
+          summary: "High response time on {{ $labels.service }}"
+          description: "95th percentile response time is above 1s (current: {{ $value }}s)"
+
+      # Service Unavailable
+      - alert: ServiceUnavailable
+        expr: up{job=~"api-gateway|auth-service|product-service|order-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: application
+        annotations:
+          summary: "Service {{ $labels.job }} is unavailable"
+          description: "{{ $labels.job }} has been unavailable for more than 1 minute"
+
+      # High Request Rate (Potential DDoS)
+      - alert: HighRequestRate
+        expr: rate(http_requests_total[1m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Unusually high request rate on {{ $labels.service }}"
+          description: "Request rate is above 1000 req/s (current: {{ $value }} req/s)"
+
+  - name: container_alerts
+    interval: 30s
+    rules:
+      # Container High CPU
+      - alert: ContainerHighCPU
+        expr: (sum(rate(container_cpu_usage_seconds_total{name!=""}[5m])) by (name) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} high CPU usage"
+          description: "Container CPU usage is above 80% (current: {{ $value }}%)"
+
+      # Container High Memory
+      - alert: ContainerHighMemory
+        expr: (container_memory_usage_bytes{name!=""} / container_spec_memory_limit_bytes{name!=""}) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} high memory usage"
+          description: "Container memory usage is above 90% (current: {{ $value }}%)"
+
+      # Container Restarting
+      - alert: ContainerRestarting
+        expr: rate(container_last_seen{name!=""}[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          category: container
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting"
+          description: "Container has restarted {{ $value }} times in the last 5 minutes"
+
+  - name: business_alerts
+    interval: 1m
+    rules:
+      # No Orders Created
+      - alert: NoOrdersCreated
+        expr: rate(orders_created_total[1h]) == 0
+        for: 1h
+        labels:
+          severity: warning
+          category: business
+        annotations:
+          summary: "No orders created in the last hour"
+          description: "The system has not processed any orders for 1 hour"
+
+      # High Order Failure Rate
+      - alert: HighOrderFailureRate
+        expr: (rate(orders_failed_total[5m]) / rate(orders_total[5m])) * 100 > 10
+        for: 10m
+        labels:
+          severity: critical
+          category: business
+        annotations:
+          summary: "High order failure rate"
+          description: "Order failure rate is above 10% (current: {{ $value }}%)"
+
+      # Authentication Failures Spike
+      - alert: AuthenticationFailuresSpike
+        expr: rate(auth_failures_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "Spike in authentication failures"
+          description: "Authentication failures are above 10/s (current: {{ $value }}/s)"
