@@ -4,16 +4,58 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const axios = require('axios');
+const promClient = require('prom-client');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Prometheus metrics setup
+const register = new promClient.Registry();
+promClient.collectDefaultMetrics({ register });
+
+// Custom metrics
+const httpRequestDuration = new promClient.Histogram({
+  name: 'http_request_duration_seconds',
+  help: 'Duration of HTTP requests in seconds',
+  labelNames: ['method', 'route', 'status_code'],
+  buckets: [0.1, 0.5, 1, 2, 5]
+});
+
+const httpRequestTotal = new promClient.Counter({
+  name: 'http_requests_total',
+  help: 'Total number of HTTP requests',
+  labelNames: ['method', 'route', 'status_code']
+});
+
+const proxyRequestDuration = new promClient.Histogram({
+  name: 'proxy_request_duration_seconds',
+  help: 'Duration of proxied requests in seconds',
+  labelNames: ['target_service', 'status_code'],
+  buckets: [0.1, 0.5, 1, 2, 5]
+});
+
+register.registerMetric(httpRequestDuration);
+register.registerMetric(httpRequestTotal);
+register.registerMetric(proxyRequestDuration);
 
 // Middleware
 app.use(helmet());
 app.use(cors());
 app.use(express.json());
 app.use(morgan('combined'));
+
+// Metrics middleware
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = (Date.now() - start) / 1000;
+    const route = req.route ? req.route.path : req.path;
+    httpRequestDuration.labels(req.method, route, res.statusCode).observe(duration);
+    httpRequestTotal.labels(req.method, route, res.statusCode).inc();
+  });
+  next();
+});
 
 // Rate limiting
 const limiter = rateLimit({
@@ -63,6 +105,9 @@ app.get('/health/services', async (req, res) => {
 
 // Route helper function
 const proxyRequest = async (req, res, serviceUrl) => {
+  const start = Date.now();
+  const serviceName = Object.keys(SERVICES).find(key => SERVICES[key] === serviceUrl) || 'unknown';
+
   try {
     const response = await axios({
       method: req.method,
@@ -74,10 +119,18 @@ const proxyRequest = async (req, res, serviceUrl) => {
       },
       params: req.query
     });
+
+    const duration = (Date.now() - start) / 1000;
+    proxyRequestDuration.labels(serviceName, response.status).observe(duration);
+
     res.status(response.status).json(response.data);
   } catch (error) {
+    const duration = (Date.now() - start) / 1000;
+    const statusCode = error.response?.status || 500;
+    proxyRequestDuration.labels(serviceName, statusCode).observe(duration);
+
     console.error(`Error proxying to ${serviceUrl}:`, error.message);
-    res.status(error.response?.status || 500).json({
+    res.status(statusCode).json({
       error: error.response?.data || 'Service unavailable',
       service: serviceUrl
     });
@@ -102,6 +155,12 @@ app.all('/api/orders/*', (req, res) => {
   proxyRequest(req, res, SERVICES.order);
 });
 
+// Metrics endpoint
+app.get('/metrics', async (req, res) => {
+  res.set('Content-Type', register.contentType);
+  res.end(await register.metrics());
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -110,6 +169,7 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/health',
       serviceHealth: '/health/services',
+      metrics: '/metrics',
       auth: '/api/auth/*',
       products: '/api/products/*',
       orders: '/api/orders/*'
